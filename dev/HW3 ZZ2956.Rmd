@@ -1,0 +1,219 @@
+---
+title: "QMSS 5069 Applied Data Science For Social Scientists HW3"
+author: "Zhixing Zhou"
+date: "2023-05-04"
+output:
+  md_document:
+    variant: markdown_github
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE,root.dir="C:\\Users\\Zhixing Zhou\\Desktop\\TC - Spring Courses\\QMSS 5069 Applied Data Science for Social Scientists\\hw3 (local codes) resubmit")
+```
+
+Instructions: Answer the following questions using F1 data on the AWS S3 utilizing Databricks. You can use Pandas, R or PySpark.
+
+[10 pts] What was the average time each driver spent at the pit stop for each race?
+
+[20 pts] Rank the average time spent at the pit stop in order of who won each race
+
+[20 pts] Insert the missing code (e.g: ALO for Alonso) for drivers based on the 'drivers' dataset
+
+[20 pts] Who is the youngest and oldest driver for each race? Create a new column called “Age”
+
+[20 pts] For a given race, which driver has the most wins and losses?
+
+[10 pts] Continue exploring the data by answering your own question.
+
+Commit your assignment to your individual Github classroom repo. Your code and git commits should follow the basic principles we discussed so far.
+
+
+```{r}
+#System Setting
+options(dplyr.width = Inf)
+
+# Set Working Directory
+setwd("C:\\Users\\Zhixing Zhou\\Desktop\\TC - Spring Courses\\QMSS 5069 Applied Data Science for Social Scientists\\hw3 (local codes) resubmit\\data")
+
+# Load Libraries
+library(tidyverse)
+library(stringr)
+
+# Load Datas
+circuits<-read.csv("circuits.csv", header=TRUE)
+constructor_results<-read.csv("constructor_results.csv", header=TRUE)
+constructor_standings<-read.csv("constructor_standings.csv", header=TRUE)
+constructors<-read.csv("constructors.csv", header=TRUE)
+driver_standings<-read.csv("driver_standings.csv", header=TRUE)
+drivers<-read.csv("drivers.csv", header=TRUE)
+lap_times<-read.csv("lap_times.csv", header=TRUE)
+pit_stops<-read.csv("pit_stops.csv", header=TRUE)
+qualifying<-read.csv("qualifying.csv", header=TRUE)
+races<-read.csv("races.csv", header=TRUE)
+results<-read.csv("results.csv", header=TRUE)
+seasons<-read.csv("seasons.csv", header=TRUE)
+sprint_results<-read.csv("sprint_results.csv", header=TRUE)
+status<-read.csv("status.csv", header=TRUE)
+```
+
+[10 pts] What was the average time each driver spent at the pit stop for each race?
+```{r}
+
+
+avg_pit_stops <- pit_stops %>%
+  group_by(raceId, driverId) %>%
+  summarise(meanduration_secs=
+              mean(milliseconds)/1000) %>%
+  left_join((drivers %>% select(driverId, forename, surname)),
+            by= "driverId")
+
+print(avg_pit_stops, n=50)
+
+```
+
+[20 pts] Rank the average time spent at the pit stop in order of who won each race
+```{r}
+
+avg_pit_stops_winner_ranked <- avg_pit_stops %>%
+  left_join(results %>%
+              select(raceId, driverId, resultId, positionOrder, points),
+            by = join_by(raceId, driverId)) %>%
+  left_join((races %>% select(raceId,year,name,date)),
+             by=join_by(raceId)) %>%
+  filter(positionOrder==1) %>%
+  arrange(meanduration_secs,.by_group = FALSE) 
+
+
+print(avg_pit_stops_winner_ranked, n=50)
+```
+[20 pts] Insert the missing code (e.g: ALO for Alonso) for drivers based on the 'drivers' dataset
+```{r}
+
+split<-as.vector(drivers$"surname")
+spllist<-as.data.frame(str_split_fixed(split," ",n=10)) %>% mutate(code = NA)
+
+for (i in (1:nrow(spllist))) {
+  if ((spllist[i,"V3"]=="") & (str_length(spllist[i,"V1"])>=3)) {
+    spllist[i,"code"] <- str_to_upper(
+      str_sub(
+        spllist[i,"V1"],
+        1,3))
+  }
+  else if ((spllist[i,"V3"]=="")&(str_length(spllist[i,"V1"])<3)) {
+    spllist[i,"code"] <- str_to_upper(
+      str_sub(
+        str_c(
+          spllist[i,"V1"],
+          spllist[i,"V2"]),
+        1,3))
+  }
+  else if (spllist[i,"V3"]!="") {
+    spllist[i,"code"]<-str_to_upper(
+      str_c(
+        str_sub(
+          spllist[i,"V1"],1,1),
+        str_sub(
+          spllist[i,"V2"],1,1),
+        str_sub(
+          spllist[i,"V3"],1,1)))
+  }
+}
+
+drivers_fill_code <- drivers
+drivers_fill_code$code <- spllist$code
+
+print(as_tibble(drivers_fill_code), n=50)
+
+```
+
+[20 pts] Who is the youngest and oldest driver for each race? Create a new column called “Age”
+```{r}
+
+results_join <- results %>%
+  select(resultId,raceId, driverId,positionOrder,points) %>%
+  left_join((drivers%>%
+               select(driverId, forename, surname, dob) %>%
+               rename(driverdob=dob)),
+            join_by(driverId)) %>%
+  left_join((races %>%
+               select(raceId, year, name, date) %>%
+               rename(racename=name, raceyear=year,racedate=date)),
+            join_by(raceId))
+
+results_join$driverdob <- strptime(results_join$driverdob,
+                                   format = "%Y-%m-%d")
+results_join$racedate <- strptime(results_join$racedate,
+                                  format = "%Y-%m-%d")
+results_join <- results_join %>%
+  mutate(age_at_race = time_length(
+    difftime(racedate,driverdob),
+    "years"))
+
+results_join_agemin <- results_join %>%
+  group_by(raceId) %>%
+  filter(age_at_race==min(age_at_race)) %>%
+  mutate(agetype= "Youngest at race")
+
+results_join_agemax <- results_join %>%
+  group_by(raceId) %>%
+  filter(age_at_race==max(age_at_race)) %>%
+  mutate(agetype= "Oldest at race")
+
+results_join_ageminmax<- bind_rows(
+  results_join_agemin,results_join_agemax) %>%
+  arrange(raceId)
+
+print(results_join_ageminmax, n=50)
+
+```
+
+[20 pts] For a given race, which driver has the most wins and losses?
+
+I treat wins and losses of drivers as the position of the drivers that has most and least points  before each race. That's because it made comparing who has most losses between drivers possible.
+
+If one treat wins as the times that a driver finished in the first place, the result might be different. 
+
+```{r}
+  
+results_standings_join <- inner_join(
+  results %>%
+    select(resultId, raceId, driverId, positionOrder, points) %>%
+    rename(singlerace_positionOrder=positionOrder) %>%
+    left_join((races %>%
+                 select(raceId,year,name,date)),
+              by=join_by(raceId)) ,
+  driver_standings %>%
+    select(raceId, driverId, position,wins),
+  by=join_by(raceId,driverId)) %>%
+  group_by(raceId) %>%
+  arrange(position,.by_group = TRUE)
+
+results_standings_max <- results_standings_join %>%
+  filter(position==min(position)) %>%
+  mutate(Positiontype= "Most Wins")
+results_standings_min<-results_standings_join %>%
+  filter(position==max(position)) %>%
+  mutate(Positiontype= "Most Losses")
+
+results_standings_min_max<- bind_rows(results_standings_min,results_standings_max) %>%
+  arrange(raceId)
+print(results_standings_min_max , n=50)
+
+```
+
+[10 pts] Continue exploring the data by answering your own question.
+
+What is the average pit stop time for all the drivers in each race?
+What is each drivers performance in each race compared to that race's average pit stop time?
+```{r}
+
+avg_pit_stops_for_all<-avg_pit_stops %>% 
+  group_by(raceId) %>% 
+  mutate(meanpitstopforall=mean(meanduration_secs),
+         performance=round(meanduration_secs-meanpitstopforall,digits=5))
+print(avg_pit_stops_for_all , n=50)
+
+```
+
